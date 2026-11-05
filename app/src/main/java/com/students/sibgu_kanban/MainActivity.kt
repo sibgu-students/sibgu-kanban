@@ -17,19 +17,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.students.sibgu_kanban.ui.theme.SibgukanbanTheme
+import com.students.sibgu_kanban.presentation.board.BoardScreen
 import com.google.firebase.firestore.FirebaseFirestore
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
         setContent {
             SibgukanbanTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    FirebaseMessageScreen(
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+                BoardScreen()
             }
         }
     }
@@ -50,9 +48,14 @@ fun FirebaseMessageScreen(modifier: Modifier = Modifier) {
                 } else {
                     val document = snapshot?.documents?.firstOrNull()
                     when {
-                        document == null -> "В коллекции test пока нет документов"
-                        document.get("message") !is String -> "Поле message отсутствует или не является строкой"
-                        else -> document.getString("message").orEmpty()
+                        document == null ->
+                            "В коллекции test пока нет документов"
+
+                        document.get("message") !is String ->
+                            "Поле message отсутствует или не является строкой"
+
+                        else ->
+                            document.getString("message").orEmpty()
                     }
                 }
             }
@@ -68,5 +71,13 @@ fun FirebaseMessageScreen(modifier: Modifier = Modifier) {
 fun FirebaseMessagePreview() {
     SibgukanbanTheme {
         Text("Пример сообщения")
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun BoardScreenPreview() {
+    SibgukanbanTheme {
+        BoardScreen()
     }
 }
