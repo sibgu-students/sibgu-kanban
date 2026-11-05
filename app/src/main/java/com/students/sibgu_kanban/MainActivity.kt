@@ -9,9 +9,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.students.sibgu_kanban.ui.theme.SibgukanbanTheme
+import com.google.firebase.firestore.FirebaseFirestore
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -20,8 +26,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             SibgukanbanTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
+                    FirebaseMessageScreen(
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -31,17 +36,37 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
+fun FirebaseMessageScreen(modifier: Modifier = Modifier) {
+    var message by remember { mutableStateOf("Загрузка…") }
+
+    DisposableEffect(Unit) {
+        // The test document uses an automatic ID, so read the first document.
+        val registration = FirebaseFirestore.getInstance()
+            .collection("test")
+            .limit(1)
+            .addSnapshotListener { snapshot, error ->
+                message = if (error != null) {
+                    "Ошибка загрузки: ${error.localizedMessage}"
+                } else {
+                    val document = snapshot?.documents?.firstOrNull()
+                    when {
+                        document == null -> "В коллекции test пока нет документов"
+                        document.get("message") !is String -> "Поле message отсутствует или не является строкой"
+                        else -> document.getString("message").orEmpty()
+                    }
+                }
+            }
+
+        onDispose { registration.remove() }
+    }
+
+    Text(text = message, modifier = modifier)
 }
 
 @Preview(showBackground = true)
 @Composable
-fun GreetingPreview() {
+fun FirebaseMessagePreview() {
     SibgukanbanTheme {
-        Greeting("Android")
+        Text("Пример сообщения")
     }
 }
