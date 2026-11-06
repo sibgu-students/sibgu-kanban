@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.sp
 import com.students.sibgu_kanban.domain.model.Task
 import com.students.sibgu_kanban.domain.model.TaskStatus
 import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalInspectionMode
+import com.students.sibgu_kanban.data.repository.FirestoreTasksRepository
 
 
 
@@ -52,8 +54,34 @@ fun BoardScreen() {
         mutableStateListOf<Task>()
     }
 
-    var nextId by remember {
-        mutableIntStateOf(1)
+    val isPreview = LocalInspectionMode.current
+    val repository = remember(isPreview) {
+        if (isPreview) null else FirestoreTasksRepository()
+    }
+    var loading by remember { mutableStateOf(!isPreview) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var fromCache by remember { mutableStateOf(false) }
+    var pendingWrites by remember { mutableStateOf(false) }
+    var retry by remember { mutableIntStateOf(0) }
+    val reportError: (Exception) -> Unit = { error ->
+        errorMessage = error.localizedMessage ?: "Ошибка синхронизации"
+    }
+
+    DisposableEffect(repository, retry) {
+        val unsubscribe = repository?.observe(
+            onChange = { snapshot ->
+                tasks.clear()
+                tasks.addAll(snapshot.tasks)
+                fromCache = snapshot.fromCache
+                pendingWrites = snapshot.hasPendingWrites
+                loading = false
+            },
+            onError = { error ->
+                loading = false
+                reportError(error)
+            }
+        )
+        onDispose { unsubscribe?.invoke() }
     }
 
     // Задача для просмотра
@@ -87,19 +115,40 @@ fun BoardScreen() {
         },
 
         bottomBar = {
-            Button(
-                onClick = {
-                    showAddDialog = true
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-                    .heightIn(min = 56.dp)
-            ) {
-                Text(
-                    text = "Добавить задачу",
-                    fontSize = BUTTON_FONT
-                )
+            Column {
+                if (errorMessage != null) {
+                    Text(
+                        text = errorMessage.orEmpty(),
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    TextButton(onClick = {
+                        errorMessage = null
+                        loading = true
+                        retry++
+                    }) { Text("Повторить подключение") }
+                }
+                if (pendingWrites || fromCache) {
+                    Text(
+                        text = if (pendingWrites) "Изменения ожидают синхронизации"
+                               else "Показаны сохранённые данные; ожидаем сервер",
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+                Button(
+                    onClick = {
+                        showAddDialog = true
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .heightIn(min = 56.dp)
+                ) {
+                    Text(
+                        text = "Добавить задачу",
+                        fontSize = BUTTON_FONT
+                    )
+                }
             }
         }
     ) { padding ->
@@ -113,7 +162,12 @@ fun BoardScreen() {
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Задач пока нет",
+                    text = when {
+                        loading -> "Загрузка задач…"
+                        errorMessage != null -> "Не удалось загрузить задачи"
+                        fromCache -> "В сохранённых данных задач нет"
+                        else -> "Задач пока нет"
+                    },
                     fontSize = BODY_FONT,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -142,7 +196,7 @@ fun BoardScreen() {
                         },
 
                         onDelete = {
-                            tasks.remove(task)
+                            repository?.delete(task.id, reportError)
 
                             if (selectedTask?.id == task.id) {
                                 selectedTask = null
@@ -160,7 +214,12 @@ fun BoardScreen() {
 
 
     // Просмотр подробностей
-    selectedTask?.let { task ->
+    selectedTask?.let { selected ->
+        val task = tasks.firstOrNull { it.id == selected.id }
+        if (task == null) {
+            LaunchedEffect(selected.id) { selectedTask = null }
+            return@let
+        }
 
         AlertDialog(
             onDismissRequest = {
@@ -242,16 +301,7 @@ fun BoardScreen() {
 
             onSave = { title, description, status ->
 
-                tasks.add(
-                    Task(
-                        id = nextId,
-                        title = title,
-                        description = description,
-                        status = status
-                    )
-                )
-
-                nextId++
+                repository?.add(title, description, status, reportError)
                 showAddDialog = false
             }
         )
@@ -270,18 +320,10 @@ fun BoardScreen() {
 
             onSave = { title, description, status ->
 
-                val index = tasks.indexOfFirst {
-                    it.id == task.id
-                }
-
-                if (index != -1) {
-
-                    tasks[index] = task.copy(
-                        title = title,
-                        description = description,
-                        status = status
-                    )
-                }
+                repository?.update(
+                    task.copy(title = title, description = description, status = status),
+                    reportError
+                )
 
                 editingTask = null
             }
@@ -308,7 +350,8 @@ fun TaskItem(
                 // Свайп влево — удаление
                 SwipeToDismissBoxValue.EndToStart -> {
                     onDelete()
-                    true
+                    // The snapshot controls removal and restores the card if a write fails.
+                    false
                 }
 
                 // Свайп вправо — редактирование
